@@ -36,7 +36,6 @@ final class SettingsManager {
         static let ambientBackdropStyle = "settings.ambientBackdropStyle"
         static let popOutVideoOnNavigateAway = "settings.popOutVideoOnNavigateAway"
         static let showYouTubeControlsOnVideo = "settings.showYouTubeControlsOnVideo"
-        static let playlistSearchQueueFromResults = "settings.playlistSearchQueueFromResults"
         #if DEBUG
             static let useLegacyMacOS15UI = "settings.debug.useLegacyMacOS15UI"
         #endif
@@ -473,16 +472,6 @@ final class SettingsManager {
         }
     }
 
-    /// When playing a track found via in-playlist search, whether the queue is built from the
-    /// current search results (starting at the tapped match) instead of the whole playlist.
-    /// Defaults to `false` — playing a match queues the entire playlist from that track's
-    /// original position, as if it had been tapped in the unfiltered list.
-    var playlistSearchQueueFromResults: Bool {
-        didSet {
-            UserDefaults.standard.set(self.playlistSearchQueueFromResults, forKey: Keys.playlistSearchQueueFromResults)
-        }
-    }
-
     /// The style the YouTube watch page should request: the chosen style when
     /// enabled, `.off` when the feature is disabled. Runtime energy/accessibility
     /// downgrades are applied inside `AmbientVideoBackdrop`, which observes those
@@ -576,7 +565,6 @@ final class SettingsManager {
         self.ambientBackdropEnabled = UserDefaults.standard.object(forKey: Keys.ambientBackdropEnabled) as? Bool ?? true
         self.popOutVideoOnNavigateAway = UserDefaults.standard.object(forKey: Keys.popOutVideoOnNavigateAway) as? Bool ?? true
         self.showYouTubeControlsOnVideo = Self.loadShowYouTubeControlsOnVideo(from: UserDefaults.standard)
-        self.playlistSearchQueueFromResults = UserDefaults.standard.object(forKey: Keys.playlistSearchQueueFromResults) as? Bool ?? false
         #if DEBUG
             self.useLegacyMacOS15UI = UserDefaults.standard.object(forKey: Keys.useLegacyMacOS15UI) as? Bool ?? false
         #endif
