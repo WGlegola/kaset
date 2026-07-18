@@ -27,6 +27,10 @@ struct PlaylistDetailView: View {
     @State private var isRefining: Bool = false
     /// Error message from refine operation.
     @State private var refineError: String?
+    /// In-playlist search text. Filters which tracks are *shown* only; playing a match
+    /// still starts the queue at that track's original position in the full playlist.
+    /// Non-private so the search UI in `PlaylistDetailView+Search.swift` can bind to it.
+    @State var searchQuery: String = ""
     /// Computed property to check if playlist is in library.
     var isInLibrary: Bool {
         if self.playlist.isAlbum {
@@ -107,6 +111,16 @@ struct PlaylistDetailView: View {
                 self.viewModel.handleLikeStatusChange(event)
             }
         }
+        .onChange(of: self.searchQuery) { oldValue, newValue in
+            // When a real search begins, pull in the rest of a still-paginating playlist so
+            // the filter covers every track, not just the pages loaded so far. Compare on the
+            // normalized query so a whitespace-only entry (which filters nothing) never
+            // triggers a full-playlist fetch.
+            guard PlaylistTrackFilter.normalize(oldValue).isEmpty,
+                  !PlaylistTrackFilter.normalize(newValue).isEmpty,
+                  self.viewModel.hasMore else { return }
+            Task { await self.viewModel.loadAllRemaining() }
+        }
         .sheet(isPresented: self.$showRefineSheet) {
             if let detail = viewModel.playlistDetail {
                 RefinePlaylistSheet(
@@ -148,6 +162,11 @@ struct PlaylistDetailView: View {
 
                 Divider()
                     .padding(.bottom, 24)
+
+                if self.shouldShowSearchField(for: detail) {
+                    self.searchField
+                        .padding(.bottom, 24)
+                }
 
                 self.trackRows(
                     detail.tracks, isAlbum: detail.isAlbum, author: detail.author?.name,
@@ -258,44 +277,7 @@ struct PlaylistDetailView: View {
         return detail.isAlbum ? String(localized: "Album") : String(localized: "Playlist")
     }
 
-    @ViewBuilder
-    private func trackRows(
-        _ tracks: [Song], isAlbum: Bool, author: String?, fallbackAlbum: Album? = nil
-    ) -> some View {
-        ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-            // Row and divider form one lazy-stack element: as siblings they doubled
-            // the subviews the stack places and re-realizes while scrolling.
-            VStack(spacing: 0) {
-                self.trackRow(
-                    track, index: index, tracks: tracks, isAlbum: isAlbum, author: author,
-                    fallbackAlbum: fallbackAlbum
-                )
-
-                if index < tracks.count - 1 {
-                    Divider()
-                        // For albums: 28 (index) + 12 (spacing)
-                        // For playlists: 28 (index) + 12 (spacing) + 40 (thumbnail) + 16 (spacing)
-                        .padding(.leading, isAlbum ? 40 : 96)
-                }
-            }
-            .onAppear {
-                self.viewModel.loadMoreIfNeeded(appearingAt: index)
-            }
-        }
-
-        // Loading indicator for pagination
-        if self.viewModel.loadingState == .loadingMore {
-            HStack {
-                Spacer()
-                ProgressView()
-                    .controlSize(.small)
-                    .padding()
-                Spacer()
-            }
-        }
-    }
-
-    private func trackRow(
+    func trackRow(
         _ track: Song, index: Int, tracks: [Song], isAlbum: Bool, author: String?,
         fallbackAlbum: Album? = nil
     ) -> some View {
