@@ -9,8 +9,6 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
     @State var viewModel: ArtistDetailViewModel
     @Environment(PlayerService.self) private var playerService
     @Environment(AuthService.self) private var authService
-    @Environment(FavoritesManager.self) private var favoritesManager
-    @Environment(SongLikeStatusManager.self) private var likeStatusManager
 
     init(
         artist: Artist,
@@ -141,7 +139,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: detail.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 180, height: 180)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)
@@ -384,64 +382,12 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             .buttonStyle(.plain)
         }
         .contextMenu {
-            Button {
-                self.playTopSong(song, displayedIndex: index)
-            } label: {
-                Label(String(localized: "Play"), systemImage: "play.fill")
-            }
-
-            if self.authService.hasPersonalAccount {
-                Divider()
-
-                FavoritesContextMenu.menuItem(for: song, manager: self.favoritesManager)
-
-                Divider()
-
-                LikeDislikeContextMenu(song: song, likeStatusManager: self.likeStatusManager)
-            }
-
-            Divider()
-
-            StartRadioContextMenu.menuItem(for: song, playerService: self.playerService)
-
-            if self.authService.hasPersonalAccount {
-                Divider()
-
-                Button {
-                    SongActionsHelper.addToLibrary(song, playerService: self.playerService)
-                } label: {
-                    Label(String(localized: "Add to Library"), systemImage: "plus.circle")
-                }
-
-                Divider()
-
-                AddToPlaylistContextMenu(song: song, client: self.viewModel.client)
-            }
-
-            Divider()
-
-            ShareContextMenu.menuItem(for: song)
-
-            Divider()
-
-            AddToQueueContextMenu(song: song, playerService: self.playerService)
-
-            // Go to Album - show if album has valid browse ID
-            if let album = song.album, album.hasNavigableId {
-                Divider()
-
-                let playlist = Playlist(
-                    id: album.id,
-                    title: album.title,
-                    description: nil,
-                    thumbnailURL: album.thumbnailURL ?? song.thumbnailURL,
-                    trackCount: album.trackCount,
-                    author: Artist.inline(name: album.artistsDisplay, namespace: "album-artist")
-                )
-                NavigationLink(value: playlist) {
-                    Label(String(localized: "Go to Album"), systemImage: "square.stack")
-                }
-            }
+            SongContextMenu(
+                song: song,
+                client: self.viewModel.client,
+                play: { self.playTopSong(song, displayedIndex: index) },
+                showsGoToArtist: false
+            )
         }
     }
 
@@ -488,6 +434,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.albumCard(album)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                AlbumContextMenu(album: album, client: self.viewModel.client)
+            }
         }
     }
 
@@ -503,6 +452,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.playlistCard(playlist)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                PlaylistContextMenu(playlist: playlist, client: self.viewModel.client)
+            }
         }
     }
 
@@ -518,6 +470,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.artistCard(artist)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                ArtistContextMenu(artist: artist)
+            }
         }
     }
 
@@ -538,7 +493,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: album.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 140, height: 140)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)
@@ -573,7 +528,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: playlist.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 140, height: 140)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)
@@ -612,7 +567,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: artist.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 140, height: 140)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)
@@ -711,7 +666,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 CachedAsyncImage(url: episode.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 220, height: 124)) { image in
                     image
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .scaledToFill()
                 } placeholder: {
                     Rectangle()
                         .fill(.quaternary)
@@ -770,6 +725,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.albumCard(album)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                AlbumContextMenu(album: album, client: self.viewModel.client)
+            }
         }
     }
 
@@ -788,7 +746,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                     CachedAsyncImage(url: playlist.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 140, height: 140)) { image in
                         image
                             .resizable()
-                            .aspectRatio(contentMode: .fill)
+                            .scaledToFill()
                     } placeholder: {
                         Rectangle()
                             .fill(.quaternary)
@@ -809,6 +767,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 }
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                PlaylistContextMenu(playlist: playlist, client: self.viewModel.client)
+            }
         }
     }
 
@@ -826,6 +787,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.podcastCard(show)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                PodcastShowContextMenu(show: show)
+            }
         }
     }
 
@@ -834,7 +798,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: show.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 140, height: 140)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)
@@ -869,6 +833,9 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
                 self.relatedArtistCard(artist)
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                ArtistContextMenu(artist: artist)
+            }
         }
     }
 
@@ -877,7 +844,7 @@ struct ArtistDetailView: View { // swiftlint:disable:this type_body_length
             CachedAsyncImage(url: artist.thumbnailURL?.highQualityThumbnailURL, targetSize: CGSize(width: 120, height: 120)) { image in
                 image
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
             } placeholder: {
                 Rectangle()
                     .fill(.quaternary)

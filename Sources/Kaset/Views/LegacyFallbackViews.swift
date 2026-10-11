@@ -58,10 +58,12 @@ struct SimplePlaylistDetailView: View {
                     .environment(\.playerBarCurrentAlbumID, self.playlist.isAlbum ? self.playlist.id : nil)
             }
         }
-        .task {
-            if self.viewModel.loadingState == .idle {
-                await self.viewModel.load()
-            }
+        // Keyed on `.idle` so the load re-runs when the view model drops back to it
+        // (e.g. a like-status scope change invalidates Liked Music pagination);
+        // a plain `.task` runs once and would leave the loading spinner up forever.
+        .task(id: self.viewModel.loadingState == .idle) {
+            guard self.viewModel.loadingState == .idle else { return }
+            await self.viewModel.ensureLoaded()
         }
         .refreshable {
             await self.viewModel.refresh()
@@ -92,7 +94,7 @@ struct SimplePlaylistDetailView: View {
 
         return HStack(alignment: .top, spacing: 20) {
             AsyncImage(url: detail.thumbnailURL) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
+                image.resizable().scaledToFill()
             } placeholder: {
                 Color.secondary.opacity(0.2)
             }
@@ -147,7 +149,7 @@ struct SimplePlaylistDetailView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 28, alignment: .trailing)
                         AsyncImage(url: track.thumbnailURL) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
+                            image.resizable().scaledToFill()
                         } placeholder: {
                             Color.secondary.opacity(0.15)
                         }
@@ -175,10 +177,18 @@ struct SimplePlaylistDetailView: View {
                 .buttonStyle(.plain)
                 .disabled(!track.isPlayable)
                 .opacity(track.isPlayable ? 1 : 0.5)
-                .onAppear {
-                    if index >= tracks.count - 3, self.viewModel.hasMore {
-                        Task { await self.viewModel.loadMore() }
+                .contextMenu {
+                    if track.isPlayable {
+                        SongContextMenu(
+                            song: track,
+                            client: self.viewModel.client,
+                            play: { Task { await self.playFromIndex(index, tracks: tracks) } },
+                            showsGoToAlbum: self.viewModel.playlistDetail?.isAlbum != true
+                        )
                     }
+                }
+                .onAppear {
+                    self.viewModel.loadMoreIfNeeded(appearingAt: index)
                 }
                 Divider().opacity(0.2)
             }

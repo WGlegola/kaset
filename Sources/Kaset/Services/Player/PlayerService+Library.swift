@@ -1,9 +1,17 @@
 import Foundation
 
+// MARK: - MusicLibraryMutationState
+
+struct MusicLibraryMutationState {
+    let generation: UInt64
+    var confirmedState: MusicLibraryConfirmedState?
+}
+
 // MARK: - LibraryMutationRequest
 
 private struct LibraryMutationRequest {
-    let token: String
+    /// Nil resolves the add token from metadata within the serialized request.
+    let token: String?
     let videoId: String
     let accountID: String
     let mutationRevision: UInt64
@@ -108,7 +116,31 @@ extension PlayerService {
         self.currentTrackLikeStatus = finalStatus
     }
 
-    // swiftlint:disable function_body_length
+    /// Saves an arbitrary song through the same serialized mutations as the player bar.
+    @discardableResult
+    func addToLibrary(song: Song) -> Task<Void, Never> {
+        guard self.canPerformAccountMutation, self.ytMusicClient != nil else { return Task {} }
+        let queuedSong = self.queueEntries.first {
+            $0.song.videoId == song.videoId && ($0.song.isInLibrary != nil || $0.song.feedbackTokens != nil)
+        }?.song
+        let key = self.songLikeStatusManager.activeAccountID + "\u{0}" + song.videoId
+        let confirmedState = self.libraryMutationStates[key]?.confirmedState
+        let baseline = self.currentTrack?.videoId == song.videoId
+            ? MusicLibraryConfirmedState(
+                isInLibrary: self.currentTrackInLibrary,
+                feedbackTokens: self.currentTrackFeedbackTokens
+            )
+            : MusicLibraryConfirmedState(
+                isInLibrary: queuedSong?.isInLibrary ?? confirmedState?.isInLibrary ?? song.isInLibrary ?? false,
+                feedbackTokens: queuedSong?.feedbackTokens ?? confirmedState?.feedbackTokens ?? song.feedbackTokens
+            )
+        return self.setLibraryStatus(
+            for: song,
+            baseline: baseline,
+            expectedInLibrary: true,
+            token: nil
+        )
+    }
 
     /// Toggles the library status of the current track.
     func toggleLibraryStatus() {
@@ -118,8 +150,6 @@ extension PlayerService {
         }
         guard let track = currentTrack else { return }
         self.logger.info("Toggling library status for current track: \(track.videoId)")
-        let activeAccountID = self.songLikeStatusManager.activeAccountID
-
         // Determine which token to use based on current state
         let isCurrentlyInLibrary = self.currentTrackInLibrary
         let tokenToUse = isCurrentlyInLibrary
@@ -130,16 +160,35 @@ extension PlayerService {
             self.logger.warning("No feedback token available for library toggle")
             return
         }
-        self.libraryMutationGeneration &+= 1
+        self.setLibraryStatus(
+            for: track,
+            baseline: MusicLibraryConfirmedState(
+                isInLibrary: isCurrentlyInLibrary,
+                feedbackTokens: self.currentTrackFeedbackTokens
+            ),
+            expectedInLibrary: !isCurrentlyInLibrary,
+            token: token
+        )
+    }
+
+    @discardableResult
+    private func setLibraryStatus(
+        for track: Song,
+        baseline: MusicLibraryConfirmedState,
+        expectedInLibrary: Bool,
+        token: String?
+    ) -> Task<Void, Never> {
+        let activeAccountID = self.songLikeStatusManager.activeAccountID
         self.libraryMutationRevisionCounter &+= 1
         let mutationKey = activeAccountID + "\u{0}" + track.videoId
         let mutationRevision = self.libraryMutationRevisionCounter
+        self.libraryMutationStates[mutationKey] = MusicLibraryMutationState(
+            generation: mutationRevision,
+            confirmedState: self.libraryMutationStates[mutationKey]?.confirmedState
+        )
         self.libraryMutationRevisions[mutationKey] = mutationRevision
         if self.confirmedLibraryStateByKey[mutationKey] == nil {
-            self.confirmedLibraryStateByKey[mutationKey] = MusicLibraryConfirmedState(
-                isInLibrary: self.currentTrackInLibrary,
-                feedbackTokens: self.currentTrackFeedbackTokens
-            )
+            self.confirmedLibraryStateByKey[mutationKey] = baseline
         }
         let accountSessionGeneration = self.accountSessionGeneration
         let pendingMutationKey = self.pendingLibraryMutationKey(
@@ -150,11 +199,9 @@ extension PlayerService {
         self.pendingLibraryMutationCountsByKey[pendingMutationKey, default: 0] += 1
 
         // Optimistic update
-        let currentTokens = self.currentTrackFeedbackTokens
-        let expectedInLibrary = !isCurrentlyInLibrary
         // Feedback tokens are action-specific. Keep the known add/remove pair
         // stable until an authoritative metadata refresh rotates it.
-        let expectedFeedbackTokens = currentTokens
+        let expectedFeedbackTokens = baseline.feedbackTokens
         self.applyLibraryState(
             videoId: track.videoId,
             isInLibrary: expectedInLibrary,
@@ -175,13 +222,27 @@ extension PlayerService {
         let request = self.enqueueSerializedLibraryMutation(mutation)
 
         // Use API call for reliable library management
-        Task {
+        return Task {
+            defer {
+                self.finishLibraryMutationTracking(
+                    key: mutationKey,
+                    pendingMutationKey: pendingMutationKey,
+                    mutationRevision: mutationRevision
+                )
+            }
             do {
                 try await request.value.get()
                 guard self.accountSessionGeneration == accountSessionGeneration else { return }
                 guard self.isCurrentLibraryMutation(key: mutationKey, revision: mutationRevision) else { return }
-                let action = isCurrentlyInLibrary ? "removed from" : "added to"
+                let action = expectedInLibrary ? "added to" : "removed from"
                 self.logger.info("Successfully \(action) library")
+                let expectedFeedbackTokens = self.confirmedLibraryStateByKey[mutationKey]?.feedbackTokens
+                    ?? expectedFeedbackTokens
+                self.applyLibraryState(
+                    videoId: track.videoId,
+                    isInLibrary: expectedInLibrary,
+                    feedbackTokens: expectedFeedbackTokens
+                )
 
                 // The browse metadata can lag briefly, so delay the refresh and keep
                 // the optimistic library state if the response is still stale.
@@ -233,8 +294,6 @@ extension PlayerService {
         }
     }
 
-    // swiftlint:enable function_body_length
-
     private func enqueueSerializedLibraryMutation(
         _ mutation: LibraryMutationRequest
     ) -> Task<Result<Void, any Error>, Never> {
@@ -264,11 +323,38 @@ extension PlayerService {
                 return .failure(CancellationError())
             }
             do {
-                try await client.editSongLibraryStatus(feedbackTokens: [mutation.token])
-                guard self.accountSessionGeneration == mutation.accountSessionGeneration else {
+                let confirmedState: MusicLibraryConfirmedState
+                if let token = mutation.token {
+                    try await client.editSongLibraryStatus(feedbackTokens: [token])
+                    confirmedState = mutation.expectedState
+                } else {
+                    let predecessorState = self.libraryMutationStates[key]?.confirmedState
+                    let song = try await client.getSong(videoId: mutation.videoId)
+                    guard self.songLikeStatusManager.activeAccountID == mutation.accountID,
+                          self.accountSessionGeneration == mutation.accountSessionGeneration,
+                          self.canPerformAccountMutation
+                    else { return .failure(CancellationError()) }
+                    // A cached saved state cannot undo a confirmed removal, even after request cleanup.
+                    // An API-reported removal still permits saving after an external library change.
+                    let isInLibrary = song.isInLibrary == true && predecessorState?.isInLibrary != false
+                    if !isInLibrary {
+                        guard let token = song.feedbackTokens?.add ?? predecessorState?.feedbackTokens?.add else {
+                            throw YTMusicError.parseError(message: "Song library token is unavailable")
+                        }
+                        try await client.editSongLibraryStatus(feedbackTokens: [token])
+                    }
+                    confirmedState = MusicLibraryConfirmedState(
+                        isInLibrary: true,
+                        feedbackTokens: song.feedbackTokens ?? predecessorState?.feedbackTokens
+                    )
+                }
+                guard self.songLikeStatusManager.activeAccountID == mutation.accountID,
+                      self.accountSessionGeneration == mutation.accountSessionGeneration
+                else {
                     return .failure(CancellationError())
                 }
-                self.confirmedLibraryStateByKey[key] = mutation.expectedState
+                self.confirmedLibraryStateByKey[key] = confirmedState
+                self.libraryMutationStates[key]?.confirmedState = confirmedState
                 return .success(())
             } catch {
                 return .failure(error)
@@ -306,6 +392,22 @@ extension PlayerService {
         } else {
             self.pendingLibraryMutationCountsByKey[key] = count - 1
         }
+    }
+
+    private func finishLibraryMutationTracking(
+        key: String,
+        pendingMutationKey: String,
+        mutationRevision: UInt64
+    ) {
+        // Requests for one track are serialized through libraryMutationTails. Each
+        // request decrements the pending count before its awaiting wrapper resumes,
+        // so the latest wrapper is the only completion that can satisfy both checks.
+        guard self.libraryMutationRevisions[key] == mutationRevision,
+              self.pendingLibraryMutationCountsByKey[pendingMutationKey] == nil
+        else { return }
+
+        self.libraryMutationRevisions.removeValue(forKey: key)
+        self.confirmedLibraryStateByKey.removeValue(forKey: key)
     }
 
     private func isCurrentLibraryMutation(key: String, revision: UInt64) -> Bool {
@@ -419,11 +521,11 @@ extension PlayerService {
             for: videoId,
             accountID: activeAccountID
         )
-        let libraryMutationGeneration = self.libraryMutationGeneration
+        let mutationKey = activeAccountID + "\u{0}" + videoId
+        let libraryMutationGeneration = self.libraryMutationStates[mutationKey]?.generation
         let accountSessionGeneration = self.accountSessionGeneration
         let pendingMutationKey = self.pendingLibraryMutationKey(
-            accountID: activeAccountID,
-            videoId: videoId,
+            accountID: activeAccountID, videoId: videoId,
             sessionGeneration: accountSessionGeneration
         )
         let libraryMutationWasPending = self.pendingLibraryMutationCountsByKey[pendingMutationKey, default: 0] > 0
@@ -445,7 +547,7 @@ extension PlayerService {
                 for: videoId,
                 accountID: activeAccountID
             ) == ratingRevision
-            let libraryMutationIsCurrent = self.libraryMutationGeneration == libraryMutationGeneration
+            let libraryMutationIsCurrent = self.libraryMutationStates[mutationKey]?.generation == libraryMutationGeneration
                 && self.accountSessionGeneration == accountSessionGeneration
                 && !libraryMutationWasPending
                 && self.pendingLibraryMutationCountsByKey[pendingMutationKey, default: 0] == 0
@@ -485,7 +587,8 @@ extension PlayerService {
                     feedbackTokens: libraryMutationIsCurrent
                         ? songData.feedbackTokens
                         : self.currentTrack?.feedbackTokens,
-                    isExplicit: songData.isExplicit ?? self.currentTrack?.isExplicit
+                    isExplicit: songData.isExplicit ?? self.currentTrack?.isExplicit,
+                    audioTrackVideoId: songData.audioTrackVideoId ?? self.currentTrack?.audioTrackVideoId
                 )
 
                 // Update service state and sync with SongLikeStatusManager.
@@ -501,11 +604,12 @@ extension PlayerService {
                         feedbackTokens: songData.feedbackTokens
                     )
                     if updatesConfirmedLibraryState {
-                        let key = activeAccountID + "\u{0}" + videoId
-                        self.confirmedLibraryStateByKey[key] = MusicLibraryConfirmedState(
-                            isInLibrary: self.currentTrackInLibrary,
-                            feedbackTokens: self.currentTrackFeedbackTokens
-                        )
+                        if self.confirmedLibraryStateByKey[mutationKey] != nil {
+                            self.confirmedLibraryStateByKey[mutationKey] = MusicLibraryConfirmedState(
+                                isInLibrary: self.currentTrackInLibrary,
+                                feedbackTokens: self.currentTrackFeedbackTokens
+                            )
+                        }
                     }
                 }
 

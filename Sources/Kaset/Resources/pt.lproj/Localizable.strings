@@ -1,3 +1,6 @@
+"Ad" = "Anúncio";
+"Advertisement" = "Anúncio";
+
 // Localizable.strings
 
 "%lld songs" = "%lld músicas";
@@ -100,6 +103,8 @@
 "Continue" = "Continuar";
 "Continue Watching" = "Continuar a ver";
 "Control playback with your keyboard" = "Controle a reprodução com o teclado";
+"Controls appear when you move the pointer over the video and fade out while it plays." = "Os controlos aparecem quando move o ponteiro sobre o vídeo e desvanecem-se durante a reprodução.";
+"Copy Link" = "Copiar ligação";
 "Could not create AI session" = "Não foi possível criar a sessão de IA";
 "Couldn't capture Kaset's audio (status %d). Check Screen & System Audio Recording permission in System Settings." = "Não foi possível capturar o áudio do Kaset (estado %d). Verifique a permissão Gravação do ecrã e áudio do sistema nas Definições do Sistema.";
 "Couldn't configure the audio unit (%lld)." = "Não foi possível configurar a unidade de áudio (%lld).";
@@ -133,6 +138,7 @@
 "Downloading" = "A transferir";
 "Drag to reorder" = "Arraste para reordenar";
 "E" = "E";
+"Number %lld, %@" = "Número %1$lld, %2$@";
 "e.g., Remove slow songs, reorder by energy..." = "por exemplo, remover músicas lentas, reordenar por energia…";
 "Edit" = "Editar";
 "Electronic" = "Eletrónica";
@@ -210,6 +216,8 @@
 "Kaset works without login for public browsing, search, and playback. Sign in to access personal music collections." = "O Kaset funciona sem iniciar sessão para exploração, pesquisa e reprodução públicas. Inicie sessão para aceder a coleções pessoais de música.";
 "Kaset works without login for public YouTube search, discovery, and playback. Sign in to access personal video collections." = "O Kaset funciona sem iniciar sessão para pesquisa, descoberta e reprodução públicas no YouTube. Inicie sessão para aceder a coleções pessoais de vídeos.";
 "Kaset could not safely clear saved sign-in data. Retry before signing in again." = "O Kaset não conseguiu limpar em segurança os dados de início de sessão guardados. Tente novamente antes de iniciar sessão outra vez.";
+"Sign-In Temporarily Unavailable" = "Início de sessão temporariamente indisponível";
+"Kaset could not read saved sign-in data. Retry to restore your session." = "O Kaset não conseguiu ler os dados de início de sessão guardados. Tente novamente para restaurar a sua sessão.";
 "Kaset could not remove saved sign-in data. Try signing out again before quitting." = "O Kaset não conseguiu remover os dados de início de sessão guardados. Tente terminar sessão novamente antes de sair.";
 "Keep a playing video in a floating window when you leave the page. When off, the video stops instead." = "Mantenha um vídeo em reprodução numa janela flutuante quando sair da página. Se estiver desativado, o vídeo para em vez disso.";
 "Keep listening even when the window is closed" = "Continue a ouvir mesmo quando a janela estiver fechada";
@@ -312,7 +320,6 @@
 "Not Playing" = "Nada em reprodução";
 "Not signed in" = "Sessão não iniciada";
 "Not Supported" = "Não suportado";
-"Note: If passkeys don't work, use \"Try another way\" to sign in with password." = "Nota: se as chaves de acesso não funcionarem, use \"Try another way\" para iniciar sessão com a palavra-passe.";
 "Nothing here right now" = "Não há nada aqui neste momento";
 "Nothing to show" = "Nada para mostrar";
 "Now Playing" = "Em reprodução";
@@ -333,6 +340,7 @@
 "Permission needed" = "Permissão necessária";
 "Piano" = "Piano";
 "Picture in Picture" = "Picture in Picture";
+"Place the playback controls on the video instead of in the bar at the bottom of the window" = "Colocar os controlos de reprodução no vídeo em vez de na barra na parte inferior da janela";
 "Play" = "Reproduzir";
 "Play a song to view its lyrics here." = "Reproduza uma música para ver aqui a letra.";
 "Play All" = "Reproduzir tudo";
@@ -344,6 +352,7 @@
 "Playback Audio Quality" = "Qualidade de áudio da reprodução";
 "Playback position" = "Posição de reprodução";
 "Played" = "Reproduzido";
+"Player Controls" = "Controlos do leitor";
 "Playing" = "A reproduzir";
 "Playlist" = "Lista de reprodução";
 "Playlist not found" = "Lista de reprodução não encontrada";
@@ -383,6 +392,7 @@
 "Remove Duplicates: delete repeated songs from the queue and keep the first occurrence of each." = "Remover duplicados: elimine músicas repetidas da fila e mantenha a primeira ocorrência de cada uma.";
 "Remove extension" = "Remover extensão";
 "Remove from Favorites" = "Remover dos Favoritos";
+"Remove from Library" = "Remover da Biblioteca";
 "Remove from Playlist" = "Remover da lista de reprodução";
 "Remove from Queue" = "Remover da fila";
 "Remove from Sidebar" = "Remover da barra lateral";
@@ -423,6 +433,7 @@
 "Show a notification when a new track starts playing" = "Mostrar uma notificação quando começa a reproduzir uma nova faixa";
 "Show a soft color glow, drawn from the video, behind the player" = "Mostrar atrás do leitor um brilho suave de cor extraído do vídeo";
 "Show All" = "Mostrar tudo";
+"Show Controls on Video" = "Mostrar controlos no vídeo";
 "Show Large Artwork" = "Mostrar capa grande";
 "Show Lyrics" = "Mostrar letras";
 "Show more comments" = "Mostrar mais comentários";
