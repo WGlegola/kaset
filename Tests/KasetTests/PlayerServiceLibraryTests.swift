@@ -121,6 +121,29 @@ struct PlayerServiceLibraryTests { // swiftlint:disable:this type_body_length
         #expect(reverted)
     }
 
+    @Test("Failed rating restores WebView evidence over a stale Song snapshot")
+    func failedRatingRestoresWebViewEvidenceOverStaleSongSnapshot() async {
+        let accountID = "webview-rating-rollback-\(UUID().uuidString)"
+        self.playerService.songLikeStatusManager.setActiveAccountID(accountID)
+        defer { self.playerService.songLikeStatusManager.setActiveAccountID(nil) }
+        var song = TestFixtures.makeSong(id: "webview-rating-rollback-video")
+        song.likeStatus = .like
+        self.playerService.currentTrack = song
+        self.playerService.currentTrackLikeStatus = .like
+        self.playerService.updateLikeStatus(.indifferent)
+        self.mockClient.shouldThrowError = YTMusicError.networkError(underlying: URLError(.notConnectedToInternet))
+
+        #expect(self.playerService.currentTrackLikeStatus == .indifferent)
+        #expect(self.playerService.currentTrack?.likeStatus == .like)
+
+        self.playerService.likeCurrentTrack()
+        #expect(self.playerService.currentTrackLikeStatus == .like)
+
+        let reverted = await self.waitUntilLikeStatus(.indifferent)
+        #expect(reverted)
+        #expect(self.playerService.songLikeStatusManager.status(for: song.videoId) == .indifferent)
+    }
+
     @Test("likeCurrentTrack ignores stale completion after current track changes")
     func likeCurrentTrackIgnoresStaleCompletionAfterTrackChange() async {
         self.mockClient.rateSongDelay = .milliseconds(200)
@@ -876,6 +899,29 @@ struct PlayerServiceLibraryTests { // swiftlint:disable:this type_body_length
 
     // MARK: - Update Like Status Tests
 
+    @Test("Initial track status uses Song rating without feedback tokens")
+    func initialTrackStatusUsesSongRatingWithoutFeedbackTokens() {
+        var song = TestFixtures.makeSong(id: "row-rating-without-tokens")
+        song.likeStatus = .like
+        song.feedbackTokens = nil
+
+        self.playerService.applyInitialTrackStatus(from: song)
+
+        #expect(self.playerService.currentTrackLikeStatus == .like)
+        #expect(self.playerService.currentTrackFeedbackTokens == nil)
+    }
+
+    @Test("Initial track status prefers active account cache over Song rating")
+    func initialTrackStatusPrefersCacheOverSongRating() {
+        var song = TestFixtures.makeSong(id: "cached-row-rating")
+        song.likeStatus = .like
+        self.playerService.songLikeStatusManager.setStatus(.dislike, for: song.videoId)
+
+        self.playerService.applyInitialTrackStatus(from: song)
+
+        #expect(self.playerService.currentTrackLikeStatus == .dislike)
+    }
+
     @Test("updateLikeStatus updates status")
     func updateLikeStatus() {
         #expect(self.playerService.currentTrackLikeStatus == .indifferent)
@@ -888,6 +934,29 @@ struct PlayerServiceLibraryTests { // swiftlint:disable:this type_body_length
 
         self.playerService.updateLikeStatus(.indifferent)
         #expect(self.playerService.currentTrackLikeStatus == .indifferent)
+    }
+
+    @Test("Concrete WebView like status replaces an older Song snapshot")
+    func concreteWebViewLikeStatusReplacesSongSnapshot() {
+        var song = TestFixtures.makeSong(id: "known-row-rating")
+        song.likeStatus = .like
+        self.playerService.currentTrack = song
+        self.playerService.currentTrackLikeStatus = .like
+
+        self.playerService.updateLikeStatus(.indifferent)
+
+        #expect(self.playerService.currentTrackLikeStatus == .indifferent)
+    }
+
+    @Test("WebView like status cannot overwrite active account cache")
+    func webViewLikeStatusCannotOverwriteCache() {
+        let song = TestFixtures.makeSong(id: "known-cached-rating")
+        self.playerService.currentTrack = song
+        self.playerService.songLikeStatusManager.setStatus(.dislike, for: song.videoId)
+
+        self.playerService.updateLikeStatus(.like)
+
+        #expect(self.playerService.currentTrackLikeStatus == .dislike)
     }
 
     @Test("Account metadata refresh updates a complete owning queue entry")
@@ -943,6 +1012,97 @@ struct PlayerServiceLibraryTests { // swiftlint:disable:this type_body_length
         #expect(self.playerService.songLikeStatusManager.status(for: song.videoId) == .like)
         #expect(self.playerService.currentTrackLikeStatus == .like)
         #expect(self.playerService.currentTrack?.likeStatus == .like)
+    }
+
+    @Test("fetchSongMetadata preserves current Song rating when API rating is unknown")
+    func fetchSongMetadataPreservesCurrentSongRatingWhenUnknown() async {
+        var song = TestFixtures.makeSong(id: "row-rating-fallback")
+        song.likeStatus = .like
+        let entryID = UUID()
+        self.playerService.setQueue(entries: [QueueEntry(id: entryID, song: song)])
+        self.playerService.activePlaybackQueueEntryID = entryID
+        self.playerService.currentTrack = song
+        self.playerService.currentTrackLikeStatus = .indifferent
+        self.mockClient.songResponses[song.videoId] = Song(
+            id: song.id,
+            title: song.title,
+            artists: song.artists,
+            videoId: song.videoId,
+            likeStatus: nil
+        )
+
+        await self.playerService.fetchSongMetadata(videoId: song.videoId)
+
+        #expect(self.playerService.songLikeStatusManager.status(for: song.videoId) == nil)
+        #expect(self.playerService.currentTrackLikeStatus == .like)
+        #expect(self.playerService.currentTrack?.likeStatus == .like)
+        #expect(self.playerService.queue.first?.likeStatus == .like)
+    }
+
+    @Test("fetchSongMetadata never erases a known queue rating with unknown evidence")
+    func fetchSongMetadataNeverErasesKnownQueueRating() async {
+        var queueSong = TestFixtures.makeSong(id: "queue-rating-fallback")
+        queueSong.likeStatus = .like
+        var currentSong = queueSong
+        currentSong.likeStatus = nil
+        let entryID = UUID()
+        self.playerService.setQueue(entries: [QueueEntry(id: entryID, song: queueSong)])
+        self.playerService.activePlaybackQueueEntryID = entryID
+        self.playerService.currentTrack = currentSong
+        self.playerService.currentTrackLikeStatus = .indifferent
+        self.mockClient.songResponses[queueSong.videoId] = Song(
+            id: queueSong.id,
+            title: queueSong.title,
+            artists: queueSong.artists,
+            videoId: queueSong.videoId,
+            likeStatus: nil
+        )
+
+        await self.playerService.fetchSongMetadata(videoId: queueSong.videoId)
+
+        #expect(self.playerService.currentTrack?.likeStatus == .like)
+        #expect(self.playerService.queue.first?.likeStatus == .like)
+    }
+
+    @Test("fetchSongMetadata lets a fresh API rating replace stale cache")
+    func fetchSongMetadataLetsFreshAPIRatingReplaceStaleCache() async {
+        var song = TestFixtures.makeSong(id: "fresh-api-before-cache")
+        song.likeStatus = .like
+        self.playerService.currentTrack = song
+        self.playerService.songLikeStatusManager.setStatus(.like, for: song.videoId)
+        self.mockClient.songResponses[song.videoId] = Song(
+            id: song.id,
+            title: song.title,
+            artists: song.artists,
+            videoId: song.videoId,
+            likeStatus: .dislike
+        )
+
+        await self.playerService.fetchSongMetadata(videoId: song.videoId, queueOwner: .none)
+
+        #expect(self.playerService.songLikeStatusManager.status(for: song.videoId) == .dislike)
+        #expect(self.playerService.currentTrackLikeStatus == .dislike)
+        #expect(self.playerService.currentTrack?.likeStatus == .dislike)
+    }
+
+    @Test("fetchSongMetadata preserves explicit WebView indifferent when API rating is unknown")
+    func fetchSongMetadataPreservesExplicitWebViewIndifferentWhenUnknown() async {
+        var song = TestFixtures.makeSong(id: "explicit-web-neutral")
+        song.likeStatus = .like
+        self.playerService.currentTrack = song
+        self.playerService.updateLikeStatus(.indifferent)
+        self.mockClient.songResponses[song.videoId] = Song(
+            id: song.id,
+            title: song.title,
+            artists: song.artists,
+            videoId: song.videoId,
+            likeStatus: nil
+        )
+
+        await self.playerService.fetchSongMetadata(videoId: song.videoId, queueOwner: .none)
+
+        #expect(self.playerService.currentTrackLikeStatus == .indifferent)
+        #expect(self.playerService.currentTrack?.likeStatus == .indifferent)
     }
 
     @Test("fetchSongMetadata applies parsed co-artists to the track and owning queue")
@@ -1038,6 +1198,21 @@ struct PlayerServiceLibraryTests { // swiftlint:disable:this type_body_length
     }
 
     // MARK: - Reset Track Status Tests
+
+    @Test("resetTrackStatus clears observed WebView like status evidence")
+    func resetTrackStatusClearsWebViewLikeStatusEvidence() {
+        let song = TestFixtures.makeSong(id: "reset-observed-rating")
+        self.playerService.currentTrack = song
+        self.playerService.updateLikeStatus(.like)
+
+        #expect(self.playerService.currentTrackWebViewLikeStatusEvidence?.videoId == song.videoId)
+        #expect(self.playerService.currentTrackWebViewLikeStatusEvidence?.status == .like)
+
+        self.playerService.resetTrackStatus()
+
+        #expect(self.playerService.currentTrackLikeStatus == .indifferent)
+        #expect(self.playerService.currentTrackWebViewLikeStatusEvidence == nil)
+    }
 
     @Test("resetTrackStatus resets all status properties")
     func resetTrackStatus() {

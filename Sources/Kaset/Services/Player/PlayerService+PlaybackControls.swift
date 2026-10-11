@@ -348,14 +348,9 @@ extension PlayerService {
         if let tokens = song.feedbackTokens {
             self.currentTrackFeedbackTokens = tokens
             self.currentTrackInLibrary = song.isInLibrary ?? false
-            if let likeStatus = song.likeStatus {
-                self.currentTrackLikeStatus = likeStatus
-            }
         }
 
-        if let cachedStatus = self.songLikeStatusManager.status(for: song.videoId) {
-            self.currentTrackLikeStatus = cachedStatus
-        }
+        self.currentTrackLikeStatus = self.songLikeStatusManager.status(for: song) ?? .indifferent
     }
 
     /// Records that the WebView observer has confirmed playback actually started.

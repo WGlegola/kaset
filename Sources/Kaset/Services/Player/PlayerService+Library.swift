@@ -11,6 +11,16 @@ private struct LibraryMutationRequest {
     let expectedState: MusicLibraryConfirmedState
 }
 
+// MARK: - CurrentTrackLikeStatusEvidence
+
+private struct CurrentTrackLikeStatusEvidence {
+    let cached: LikeStatus?
+    let webView: LikeStatus?
+    let song: LikeStatus?
+    let queue: LikeStatus?
+    let visible: LikeStatus
+}
+
 @MainActor
 extension PlayerService {
     /// Likes the current track (thumbs up).
@@ -304,15 +314,14 @@ extension PlayerService {
 
     /// Updates the like status from WebView observation.
     /// Only updates PlayerService state for UI; does NOT overwrite SongLikeStatusManager cache
-    /// because WebView often reports INDIFFERENT as a default when the actual status is unknown.
+    /// because the API/cache is more authoritative. The observation is tracked separately so a
+    /// concrete WebView value can replace an older Song snapshot without promoting bridge absence.
     func updateLikeStatus(_ status: LikeStatus) {
-        // Only accept WebView status if SongLikeStatusManager has no cached value
-        // (cache is more authoritative than WebView's observation)
-        if let videoId = self.currentTrack?.videoId,
-           let cachedStatus = self.songLikeStatusManager.status(for: videoId)
-        {
-            self.currentTrackLikeStatus = cachedStatus
+        if let videoId = self.currentTrack?.videoId {
+            self.currentTrackWebViewLikeStatusEvidence = (videoId, status)
+            self.currentTrackLikeStatus = self.songLikeStatusManager.status(for: videoId) ?? status
         } else {
+            self.currentTrackWebViewLikeStatusEvidence = nil
             self.currentTrackLikeStatus = status
         }
     }
@@ -320,6 +329,7 @@ extension PlayerService {
     /// Resets like/library status when track changes.
     func resetTrackStatus() {
         self.currentTrackLikeStatus = .indifferent
+        self.currentTrackWebViewLikeStatusEvidence = nil
         self.currentTrackInLibrary = false
         self.currentTrackFeedbackTokens = nil
     }
@@ -329,11 +339,10 @@ extension PlayerService {
     /// current track may have already resolved to `.indifferent` — its `getSong` fetch
     /// returns no rating, and the cache can be empty at play time. Without this, the
     /// player bar / Now Playing surfaces (and the boring.notch mirror) keep showing
-    /// "not liked" for a track that is actually liked. Only fills an unknown status;
-    /// never overrides a known `.like` / `.dislike`.
+    /// "not liked" for a track that is actually liked. The active-account cache is
+    /// authoritative and therefore replaces lower-precedence Song/WebView evidence.
     func refreshCurrentTrackLikeStatusFromCache() {
-        guard self.currentTrackLikeStatus == .indifferent,
-              let videoId = self.currentTrack?.videoId,
+        guard let videoId = self.currentTrack?.videoId,
               let cached = self.songLikeStatusManager.status(for: videoId)
         else { return }
         self.currentTrackLikeStatus = cached
@@ -431,7 +440,7 @@ extension PlayerService {
             else { return }
             let queueOwnerIsCurrent = self.activePlaybackQueueEntryID == queueEntryID
 
-            let cachedLikeStatus = self.songLikeStatusManager.status(for: videoId)
+            let likeStatusEvidence = self.currentLikeStatusEvidence(for: videoId)
             let ratingRevisionIsCurrent = self.songLikeStatusManager.ratingRevision(
                 for: videoId,
                 accountID: activeAccountID
@@ -443,7 +452,7 @@ extension PlayerService {
             let resolvedLikeStatus = self.resolveFetchedLikeStatus(
                 videoId: videoId,
                 apiLikeStatus: songData.likeStatus,
-                cachedLikeStatus: cachedLikeStatus,
+                evidence: likeStatusEvidence,
                 ratingRevisionIsCurrent: ratingRevisionIsCurrent
             )
 
@@ -536,16 +545,42 @@ extension PlayerService {
     private func resolveFetchedLikeStatus(
         videoId: String,
         apiLikeStatus: LikeStatus?,
-        cachedLikeStatus: LikeStatus?,
+        evidence: CurrentTrackLikeStatusEvidence,
         ratingRevisionIsCurrent: Bool
     ) -> LikeStatus? {
         guard ratingRevisionIsCurrent, let apiLikeStatus else {
-            return cachedLikeStatus ?? self.currentTrackLikeStatus
+            return evidence.cached
+                ?? evidence.webView
+                ?? evidence.song
+                ?? evidence.queue
+                ?? evidence.visible
         }
         let accepted = self.songLikeStatusManager.setStatus(apiLikeStatus, for: videoId)
         return accepted
             ? apiLikeStatus
-            : (self.songLikeStatusManager.status(for: videoId) ?? self.currentTrackLikeStatus)
+            : (self.songLikeStatusManager.status(for: videoId)
+                ?? evidence.webView
+                ?? evidence.song
+                ?? evidence.queue
+                ?? evidence.visible)
+    }
+
+    private func currentLikeStatusEvidence(for videoId: String) -> CurrentTrackLikeStatusEvidence {
+        let queueLikeStatus = self.activePlaybackQueueEntryID.flatMap { entryID in
+            self.queueEntries.first {
+                $0.id == entryID && $0.song.videoId == videoId
+            }?.song.likeStatus
+        }
+        let webViewLikeStatus = self.currentTrackWebViewLikeStatusEvidence.flatMap { evidence in
+            evidence.videoId == videoId ? evidence.status : nil
+        }
+        return CurrentTrackLikeStatusEvidence(
+            cached: self.songLikeStatusManager.status(for: videoId),
+            webView: webViewLikeStatus,
+            song: self.currentTrack?.likeStatus,
+            queue: queueLikeStatus,
+            visible: self.currentTrackLikeStatus
+        )
     }
 
     private func applyFetchedMetadataToQueue(
@@ -573,7 +608,9 @@ extension PlayerService {
                 thumbnailURL: enrichedQueueSong.thumbnailURL
             )
         }
-        enrichedQueueSong.likeStatus = resolvedLikeStatus
+        if let resolvedLikeStatus {
+            enrichedQueueSong.likeStatus = resolvedLikeStatus
+        }
         if entryID == self.activePlaybackQueueEntryID {
             enrichedQueueSong.isInLibrary = self.currentTrackInLibrary
             enrichedQueueSong.feedbackTokens = self.currentTrackFeedbackTokens

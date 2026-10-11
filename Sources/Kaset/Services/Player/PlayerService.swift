@@ -347,6 +347,10 @@ final class PlayerService: NSObject, PlayerServiceProtocol {
     /// Like status of the current track.
     var currentTrackLikeStatus: LikeStatus = .indifferent
 
+    /// Concrete like-status evidence observed from the playback WebView, scoped to the
+    /// video that produced it. The bridge leaves this unset when the renderer is absent.
+    @ObservationIgnored var currentTrackWebViewLikeStatusEvidence: (videoId: String, status: LikeStatus)?
+
     /// Whether the current track is in the user's library.
     var currentTrackInLibrary: Bool = false
 
