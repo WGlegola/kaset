@@ -237,8 +237,9 @@ extension PlaylistDetailView {
             .onAppear {
                 // Scroll-based pagination only applies to the unfiltered list; a search
                 // eagerly loads the whole playlist, so the last *visible* filtered row is
-                // not a meaningful pagination trigger.
-                if self.searchQuery.isEmpty {
+                // not a meaningful pagination trigger. Gate on the normalized query, like the
+                // filter and the eager load, so a whitespace-only entry keeps paginating.
+                if PlaylistTrackFilter.normalize(self.searchQuery).isEmpty {
                     self.viewModel.loadMoreIfNeeded(appearingAt: row.index)
                 }
             }
