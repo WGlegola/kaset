@@ -64,6 +64,24 @@ struct PlaylistTrackFilterTests {
         #expect(result.map(\.track.videoId) == ["1"])
     }
 
+    @Test("Album title is matched")
+    func albumTitleIsMatched() {
+        let tracks = [
+            Song(
+                id: "1",
+                title: "Billie Jean",
+                artists: [Artist(id: "UC1", name: "Michael Jackson")],
+                album: TestFixtures.makeAlbum(title: "Thriller"),
+                videoId: "1"
+            ),
+            TestFixtures.makeSong(id: "2", title: "Bad", artistName: "Michael Jackson"),
+        ]
+        let result = PlaylistTrackFilter.filter(tracks, query: "thriller")
+
+        // Neither the title nor the artist of track 1 contains "thriller"; only its album does.
+        #expect(result.map(\.track.videoId) == ["1"])
+    }
+
     @Test("Matching ignores diacritics in both query and content")
     func matchingIsDiacriticInsensitive() {
         let tracks = [

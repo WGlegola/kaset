@@ -44,13 +44,13 @@ enum PlaylistTrackListFooter: Equatable {
 
 /// Pure, view-agnostic filtering for in-playlist track search.
 ///
-/// Matching is a case- and diacritic-insensitive substring test against the track title
-/// and each artist name, so `"dio"` finds songs by "Dio", `"diver"` finds "Holy Diver", and
-/// `"bjork"` finds "Björk".
+/// Matching is a case- and diacritic-insensitive substring test against the track title,
+/// each artist name, and the album title, so `"dio"` finds songs by "Dio", `"diver"` finds
+/// "Holy Diver", and `"bjork"` finds "Björk".
 enum PlaylistTrackFilter {
-    /// Returns every track paired with its original index, keeping only those whose title
-    /// or an artist name contains `query`. A blank (or whitespace-only) query returns all
-    /// tracks, so an empty search never hides anything.
+    /// Returns every track paired with its original index, keeping only those whose title,
+    /// an artist name, or album title contains `query`. A blank (or whitespace-only) query
+    /// returns all tracks, so an empty search never hides anything.
     static func filter(_ tracks: [Song], query: String) -> [IndexedTrack] {
         let normalizedQuery = Self.normalize(query)
         return tracks.enumerated().compactMap { offset, track in
@@ -61,14 +61,18 @@ enum PlaylistTrackFilter {
         }
     }
 
-    /// Whether `track`'s title or any artist name contains `normalizedQuery`.
+    /// Whether `track`'s title, any artist name, or its album title contains `normalizedQuery`.
     /// `normalizedQuery` must already be folded via ``normalize(_:)``.
     static func matches(_ track: Song, normalizedQuery: String) -> Bool {
         guard !normalizedQuery.isEmpty else { return true }
         if self.normalize(track.title).contains(normalizedQuery) {
             return true
         }
-        return track.artists.contains { Self.normalize($0.name).contains(normalizedQuery) }
+        if track.artists.contains(where: { Self.normalize($0.name).contains(normalizedQuery) }) {
+            return true
+        }
+        guard let album = track.album else { return false }
+        return self.normalize(album.title).contains(normalizedQuery)
     }
 
     /// Folds case and diacritics and trims surrounding whitespace so comparisons ignore
