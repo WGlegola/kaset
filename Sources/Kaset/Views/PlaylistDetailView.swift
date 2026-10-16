@@ -117,12 +117,24 @@ struct PlaylistDetailView: View {
             }
         }
         .onChange(of: self.searchQuery) { oldValue, newValue in
-            // When a real search begins, pull in the rest of a still-paginating playlist so
-            // the filter covers every track, not just the pages loaded so far. Compare on the
-            // normalized query so a whitespace-only entry (which filters nothing) never
-            // triggers a full-playlist fetch.
-            guard PlaylistTrackFilter.normalize(oldValue).isEmpty,
-                  !PlaylistTrackFilter.normalize(newValue).isEmpty,
+            // While searching, pull in the rest of a still-paginating playlist so the filter
+            // covers every track, not just the pages loaded so far. Re-run on every change of
+            // the effective query, so editing a search also retries a full load that gave up;
+            // concurrent calls coalesce onto the in-flight load. Compare on the normalized
+            // query so a whitespace-only entry (which filters nothing) never triggers a fetch.
+            let query = PlaylistTrackFilter.normalize(newValue)
+            guard !query.isEmpty,
+                  query != PlaylistTrackFilter.normalize(oldValue),
+                  self.viewModel.hasMore else { return }
+            Task { await self.viewModel.loadAllRemaining() }
+        }
+        .onChange(of: self.viewModel.loadingState == .loading) { _, isLoading in
+            // A reload (refresh, account switch, Liked Music scope change) brings back only the
+            // first page while the search text stays; pull in the rest again so it still covers
+            // every track.
+            guard !isLoading,
+                  self.viewModel.loadingState == .loaded,
+                  !PlaylistTrackFilter.normalize(self.searchQuery).isEmpty,
                   self.viewModel.hasMore else { return }
             Task { await self.viewModel.loadAllRemaining() }
         }

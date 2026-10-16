@@ -205,7 +205,7 @@ extension PlaylistDetailView {
         // Show "No Results" only for an active query that is done loading: a genuinely
         // empty playlist (no query) renders nothing, and while the playlist is still
         // paging in — an eager search load may not have reached the matching tail yet —
-        // the pagination spinner below signals progress instead of a premature empty state.
+        // the footer below signals progress (or offers a retry) instead of a premature empty state.
         if rows.isEmpty, !self.searchQuery.isEmpty, !self.viewModel.hasMore {
             self.noSearchResultsView
         }
@@ -245,8 +245,14 @@ extension PlaylistDetailView {
             }
         }
 
-        // Loading indicator for pagination
-        if self.viewModel.loadingState == .loadingMore {
+        switch PlaylistTrackFilter.listFooter(
+            queryActive: !PlaylistTrackFilter.normalize(self.searchQuery).isEmpty,
+            hasMore: self.viewModel.hasMore,
+            isLoadingPage: self.viewModel.loadingState == .loadingMore,
+            isLoadingAll: self.viewModel.isLoadingAllRemaining,
+            didFullLoadStall: self.viewModel.didFullLoadStall
+        ) {
+        case .loading:
             HStack {
                 Spacer()
                 ProgressView()
@@ -254,7 +260,31 @@ extension PlaylistDetailView {
                     .padding()
                 Spacer()
             }
+        case .incompleteResults:
+            self.incompleteSearchResultsView
+        case .none:
+            EmptyView()
         }
+    }
+
+    /// Shown while searching when the background full load gave up with tracks still missing,
+    /// so the matches above may be incomplete.
+    private var incompleteSearchResultsView: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(String(localized: "Not all tracks loaded. Results may be incomplete."))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button(String(localized: "Retry")) {
+                Task { await self.viewModel.loadAllRemaining() }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityIdentifier(AccessibilityID.PlaylistDetail.searchRetryButton)
+        }
+        .padding(16)
     }
 
     private var noSearchResultsView: some View {

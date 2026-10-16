@@ -147,4 +147,42 @@ struct PlaylistTrackFilterTests {
 
         #expect(source == nil)
     }
+
+    // MARK: - List footer
+
+    @Test("Without a search the footer is only the page-loading spinner")
+    func listFooterWithoutSearchFollowsPageLoading() {
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: false, hasMore: true, isLoadingPage: true, isLoadingAll: false, didFullLoadStall: false
+        ) == .loading)
+        // A background full load (e.g. building a play queue) or a stall shows nothing extra.
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: false, hasMore: true, isLoadingPage: false, isLoadingAll: true, didFullLoadStall: true
+        ) == PlaylistTrackListFooter.none)
+    }
+
+    @Test("While searching, the spinner covers the full load's pauses between pages")
+    func listFooterWhileSearchingShowsFullLoadProgress() {
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: true, hasMore: true, isLoadingPage: false, isLoadingAll: true, didFullLoadStall: false
+        ) == .loading)
+    }
+
+    @Test("While searching, a full load that gave up offers a retry")
+    func listFooterWhileSearchingOffersRetryAfterStall() {
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: true, hasMore: true, isLoadingPage: false, isLoadingAll: false, didFullLoadStall: true
+        ) == .incompleteResults)
+        // Before any full load finished (e.g. right as typing starts) there is no false alarm.
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: true, hasMore: true, isLoadingPage: false, isLoadingAll: false, didFullLoadStall: false
+        ) == PlaylistTrackListFooter.none)
+    }
+
+    @Test("A fully loaded playlist shows no footer while searching")
+    func listFooterWhileSearchingFullyLoadedShowsNothing() {
+        #expect(PlaylistTrackFilter.listFooter(
+            queryActive: true, hasMore: false, isLoadingPage: false, isLoadingAll: false, didFullLoadStall: false
+        ) == PlaylistTrackListFooter.none)
+    }
 }

@@ -28,6 +28,18 @@ enum PlaylistSearchQueueSource: Equatable {
     case searchResults(startIndex: Int)
 }
 
+// MARK: - PlaylistTrackListFooter
+
+/// What the bottom of the (possibly filtered) playlist track list shows.
+enum PlaylistTrackListFooter: Equatable {
+    case none
+    /// A pagination spinner.
+    case loading
+    /// A search is active but loading stopped before every track arrived, so the matches may be
+    /// incomplete; offer a retry.
+    case incompleteResults
+}
+
 // MARK: - PlaylistTrackFilter
 
 /// Pure, view-agnostic filtering for in-playlist track search.
@@ -80,5 +92,26 @@ enum PlaylistTrackFilter {
             return .searchResults(startIndex: position)
         }
         return .fullPlaylist(originalIndex: rows[position].index)
+    }
+
+    /// Decides the list footer. Without a search it is the plain pagination spinner. While
+    /// searching, scroll pagination is off and matches depend on a background full load, so the
+    /// spinner covers that load's retry pauses, and a load that gave up offers a retry instead of
+    /// leaving partial matches with no indication.
+    static func listFooter(
+        queryActive: Bool,
+        hasMore: Bool,
+        isLoadingPage: Bool,
+        isLoadingAll: Bool,
+        didFullLoadStall: Bool
+    ) -> PlaylistTrackListFooter {
+        if isLoadingPage {
+            return .loading
+        }
+        guard queryActive, hasMore else { return .none }
+        if isLoadingAll {
+            return .loading
+        }
+        return didFullLoadStall ? .incompleteResults : .none
     }
 }
