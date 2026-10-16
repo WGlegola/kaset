@@ -26,8 +26,13 @@ final class NowPlayingBroadcaster {
     private weak var playerService: PlayerService?
     private let logger = DiagnosticsLogger.player
     private var isConfigured = false
+    /// Delivers one change notification. Injectable so tests can observe posting without the
+    /// system-wide distributed notification center.
+    private let postNotification: @MainActor () -> Void
 
-    private init() {}
+    init(postNotification: @escaping @MainActor () -> Void = NowPlayingBroadcaster.postDistributedNotification) {
+        self.postNotification = postNotification
+    }
 
     /// Begins observing the player and broadcasting on change. Idempotent.
     func configure(playerService: PlayerService) {
@@ -61,8 +66,12 @@ final class NowPlayingBroadcaster {
     }
 
     private func post() {
+        self.postNotification()
+    }
+
+    static func postDistributedNotification() {
         DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name(Self.notificationName),
+            NSNotification.Name(self.notificationName),
             object: nil,
             userInfo: nil,
             deliverImmediately: true

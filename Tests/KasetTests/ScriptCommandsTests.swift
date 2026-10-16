@@ -284,6 +284,29 @@ struct ScriptCommandsTests {
         PlayerService.shared = nil
     }
 
+    @Test(
+        "Seek forwards a finite position to the player, clamping negatives to zero",
+        arguments: [(90.0, 90.0), (-5.0, 0.0)]
+    )
+    func seekForwardsFinitePosition(requested: Double, expected: Double) async {
+        let playerService = PlayerService()
+        PlayerService.shared = playerService
+        // A track that is still loading: the player records the seek target as its position.
+        playerService.pendingPlayVideoId = "seek-video"
+        playerService.duration = 240
+        playerService.progress = 30
+
+        let command = SeekCommand()
+        command.directParameter = requested as NSNumber
+        _ = command.performDefaultImplementation()
+
+        #expect(command.scriptErrorNumber == 0)
+        #expect(await self.waitUntil { playerService.progress == expected })
+
+        // Cleanup
+        PlayerService.shared = nil
+    }
+
     // MARK: - PlayCommand Tests
 
     @Test("Play sets error when PlayerService is nil")
