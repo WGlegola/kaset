@@ -262,7 +262,23 @@ struct ScriptCommandsTests {
         _ = command.performDefaultImplementation()
 
         #expect(command.scriptErrorNumber == errAECoercionFail)
-        #expect(command.scriptErrorString?.contains("Position must be a number") == true)
+        #expect(command.scriptErrorString?.contains("Position must be a finite number") == true)
+
+        // Cleanup
+        PlayerService.shared = nil
+    }
+
+    @Test("Seek rejects non-finite positions", arguments: [Double.infinity, -Double.infinity, Double.nan])
+    func seekRejectsNonFinitePosition(position: Double) {
+        let playerService = PlayerService()
+        PlayerService.shared = playerService
+
+        let command = SeekCommand()
+        command.directParameter = position as NSNumber
+        _ = command.performDefaultImplementation()
+
+        #expect(command.scriptErrorNumber == errAECoercionFail)
+        #expect(command.scriptErrorString?.contains("Position must be a finite number") == true)
 
         // Cleanup
         PlayerService.shared = nil

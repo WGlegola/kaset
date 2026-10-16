@@ -255,10 +255,12 @@ final class SetVolumeCommand: NSScriptCommand {
 @objc(KasetSeekCommand)
 final class SeekCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
-        guard let seconds = (directParameter as? NSNumber)?.doubleValue else {
+        // Reject infinity and NaN here: an infinite position reaches the player unclamped while a
+        // track is still loading (duration 0) and later crashes `get player info` JSON encoding.
+        guard let seconds = (directParameter as? NSNumber)?.doubleValue, seconds.isFinite else {
             logger.error("Seek command failed: invalid position parameter")
             scriptErrorNumber = errAECoercionFail
-            scriptErrorString = "Position must be a number of seconds."
+            scriptErrorString = "Position must be a finite number of seconds."
             return nil
         }
 
