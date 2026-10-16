@@ -285,6 +285,8 @@ Remote command center integration for media key support:
 - Registers `MPRemoteCommandCenter` handlers
 - Handles media keys (play/pause, next, previous, seek)
 - Routes commands to `PlayerService` / `YouTubePlayerService` based on the active source
+- Publishes a tagged minimal entry (title, artist) while the current music page has not played yet, so the Play key resumes Kaset; once WebKit's card exists, publishes playback state only, so the card is the single Kaset entry for music ([ADR-0042](adr/0042-single-now-playing-entry.md))
+- The music page forwards its play and pause media-session actions (and next/previous in the next/previous control style) over the bridge (`REMOTE_*`), and they go through the same native transport queue as media keys
 
 **Note**: Now Playing display (track/video info, artwork) is handled natively by WKWebView's Media Session API. This provides better integration with YouTube Music artwork and regular YouTube video metadata.
 
