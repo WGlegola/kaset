@@ -367,6 +367,31 @@ struct EqualizerServiceTests {
         #expect(service.status == .standby)
     }
 
+    @Test("A missed scan after permission is granted clears the earlier permission warning")
+    func missedScanClearsEarlierPermissionWarning() async {
+        let permission = PermissionProbe()
+        let harness = Self.makeService(
+            startResult: .failure(.tap(.noAudioSource)),
+            isPlaybackActive: { true },
+            hasCapturePermission: { permission.granted },
+            requestCapturePermission: { false }
+        )
+        let service = harness.service
+        let mock = harness.mock
+        service.setEnabled(true)
+        if case .permissionNeeded = service.status {
+            // expected
+        } else {
+            Issue.record("Expected .permissionNeeded status, got \(service.status)")
+        }
+
+        permission.granted = true
+        service.retryStartIfEnabled()
+        let scanned = await self.waitUntil { mock.startCallCount >= 1 }
+        #expect(scanned)
+        #expect(service.status == .standby)
+    }
+
     @Test("Enabling the EQ during playback rescans after a missed scan")
     func enablingDuringPlaybackRescans() async {
         let harness = Self.makeService(

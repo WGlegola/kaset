@@ -398,8 +398,10 @@ final class EqualizerService {
             self.scheduleTapVerification()
         case let .failure(failure):
             if failure.isWaitingForPlayback {
-                // Keep the standby badge.
+                // Show standby: the scan only runs once permission checks
+                // pass, so an earlier permission warning no longer applies.
                 self.lastFailure = nil
+                self.inferredPermissionDenial = false
                 if playbackKnownActive {
                     self.scheduleScanRetry()
                 }
