@@ -9,84 +9,51 @@ import Testing
 struct NowPlayingClaimTests {
     @Test("Confirmed playback publishes state only (WebKit owns the card)")
     func activePlaybackIsStateOnly() {
-        let track = (title: "Song", artist: "Artist")
-        for webKitCardAvailable in [false, true] {
-            #expect(NowPlayingManager.desiredClaim(
-                state: .playing,
-                track: track,
-                activeVideo: nil,
-                webKitCardAvailable: webKitCardAvailable
-            ) == .stateOnly(.playing))
-        }
+        #expect(NowPlayingManager.desiredClaim(
+            state: .playing,
+            hasTrack: true,
+            activeVideo: nil
+        ) == .stateOnly(.playing))
     }
 
     @Test("Starting playback keeps an existing claim until playback is confirmed")
     func startingPlaybackIsHandsOff() {
-        let track = (title: "Song", artist: "Artist")
         for state in [PlayerService.PlaybackState.loading, .buffering] {
             #expect(NowPlayingManager.desiredClaim(
                 state: state,
-                track: track,
-                activeVideo: nil,
-                webKitCardAvailable: false
+                hasTrack: true,
+                activeVideo: nil
             ) == .handsOff)
         }
     }
 
-    @Test("Not playing with a track yields a minimal claim before the page has played")
-    func pausedWithTrackClaims() {
-        let track = (title: "Song", artist: "Artist")
-        let expected = NowPlayingManager.NowPlayingClaim.claim(
-            title: "Song",
-            artist: "Artist",
-            playbackState: .paused
-        )
+    /// WebKit's card for the music page is in Control Center as soon as the page loads a track,
+    /// including on a cold launch before anything has played, so a titled claim next to it shows
+    /// up as a second Kaset entry (#457).
+    @Test("Not playing with a track publishes state only, even before the page has played")
+    func pausedWithTrackIsStateOnly() {
         for state in [PlayerService.PlaybackState.paused, .ended, .idle, .error("boom")] {
             #expect(NowPlayingManager.desiredClaim(
                 state: state,
-                track: track,
-                activeVideo: nil,
-                webKitCardAvailable: false
-            ) == expected)
-        }
-    }
-
-    /// WebKit publishes its card as a separate Now Playing entry, so a titled claim next to it
-    /// shows up as a second Kaset entry in Control Center (#457).
-    @Test("Not playing with a track publishes state only once WebKit's card exists")
-    func pausedAfterPlaybackIsStateOnly() {
-        let track = (title: "Song", artist: "Artist")
-        for state in [PlayerService.PlaybackState.paused, .ended, .idle, .error("boom")] {
-            #expect(NowPlayingManager.desiredClaim(
-                state: state,
-                track: track,
-                activeVideo: nil,
-                webKitCardAvailable: true
+                hasTrack: true,
+                activeVideo: nil
             ) == .stateOnly(.paused))
         }
     }
 
     @Test("Not playing with no track releases the native claim")
     func idleWithoutTrackReleasesClaim() {
-        for webKitCardAvailable in [false, true] {
+        for state in [PlayerService.PlaybackState.idle, .paused] {
             #expect(NowPlayingManager.desiredClaim(
-                state: .idle,
-                track: nil,
-                activeVideo: nil,
-                webKitCardAvailable: webKitCardAvailable
-            ) == .release)
-            #expect(NowPlayingManager.desiredClaim(
-                state: .paused,
-                track: nil,
-                activeVideo: nil,
-                webKitCardAvailable: webKitCardAvailable
+                state: state,
+                hasTrack: false,
+                activeVideo: nil
             ) == .release)
         }
     }
 
     @Test("Video media-key ownership uses video metadata until playback is confirmed")
     func videoOwnershipUsesFallbackClaim() {
-        let track = (title: "Song", artist: "Artist")
         let video = NowPlayingManager.ActiveVideoClaim(
             title: "Video",
             artist: "Channel",
@@ -101,15 +68,13 @@ struct NowPlayingClaimTests {
 
         #expect(NowPlayingManager.desiredClaim(
             state: .paused,
-            track: track,
-            activeVideo: video,
-            webKitCardAvailable: true
+            hasTrack: true,
+            activeVideo: video
         ) == expected)
     }
 
-    @Test("Confirmed video playback hands the Now Playing card to WebKit")
+    @Test("Confirmed video playback keeps the video claim without publishing a new one")
     func playingVideoIsHandsOff() {
-        let track = (title: "Song", artist: "Artist")
         let video = NowPlayingManager.ActiveVideoClaim(
             title: "Video",
             artist: "Channel",
@@ -119,9 +84,8 @@ struct NowPlayingClaimTests {
 
         #expect(NowPlayingManager.desiredClaim(
             state: .paused,
-            track: track,
-            activeVideo: video,
-            webKitCardAvailable: true
+            hasTrack: true,
+            activeVideo: video
         ) == .handsOff)
     }
 
@@ -141,9 +105,8 @@ struct NowPlayingClaimTests {
 
         #expect(NowPlayingManager.desiredClaim(
             state: .paused,
-            track: nil,
-            activeVideo: video,
-            webKitCardAvailable: false
+            hasTrack: false,
+            activeVideo: video
         ) == expected)
     }
 
@@ -152,7 +115,7 @@ struct NowPlayingClaimTests {
     func stateOnlyDropsClaimMetadata() {
         let center = FakeNowPlayingCenter()
         var ownership = NowPlayingManager.apply(
-            .claim(title: "Song", artist: "Artist", playbackState: .paused),
+            .claim(title: "Video", artist: "Channel", playbackState: .paused),
             to: center,
             ownership: .none
         )
@@ -164,12 +127,15 @@ struct NowPlayingClaimTests {
         #expect(center.playbackState == .playing)
     }
 
-    @Test("Pausing after the page has played publishes no metadata")
+    @Test("A paused track publishes no metadata, before or after playing")
     @MainActor
     func stateOnlyPauseHasNoMetadata() {
         let center = FakeNowPlayingCenter()
-        var ownership = NowPlayingManager.apply(.stateOnly(.playing), to: center, ownership: .none)
+        var ownership = NowPlayingManager.apply(.stateOnly(.paused), to: center, ownership: .none)
+        #expect(center.nowPlayingInfo == nil)
+        #expect(center.playbackState == .paused)
 
+        ownership = NowPlayingManager.apply(.stateOnly(.playing), to: center, ownership: ownership)
         ownership = NowPlayingManager.apply(.stateOnly(.paused), to: center, ownership: ownership)
 
         #expect(ownership == .stateOnly)
@@ -182,7 +148,7 @@ struct NowPlayingClaimTests {
     func handsOffKeepsClaim() {
         let center = FakeNowPlayingCenter()
         var ownership = NowPlayingManager.apply(
-            .claim(title: "Song", artist: "Artist", playbackState: .paused),
+            .claim(title: "Video", artist: "Channel", playbackState: .paused),
             to: center,
             ownership: .none
         )
@@ -221,6 +187,23 @@ struct NowPlayingClaimTests {
         #expect(center.playbackState == .stopped)
     }
 
+    @Test("Releasing a video claim clears its metadata and stops Kaset's player")
+    @MainActor
+    func releaseClearsVideoClaim() {
+        let center = FakeNowPlayingCenter()
+        var ownership = NowPlayingManager.apply(
+            .claim(title: "Video", artist: "Channel", playbackState: .paused),
+            to: center,
+            ownership: .none
+        )
+
+        ownership = NowPlayingManager.apply(.release, to: center, ownership: ownership)
+
+        #expect(ownership == .none)
+        #expect(center.nowPlayingInfo == nil)
+        #expect(center.playbackState == .stopped)
+    }
+
     @Test("State-only never clears metadata Kaset did not publish")
     @MainActor
     func stateOnlyLeavesForeignMetadata() {
@@ -232,72 +215,35 @@ struct NowPlayingClaimTests {
         #expect(center.nowPlayingInfo?[MPMediaItemPropertyTitle] as? String == "Someone else's card")
     }
 
-    @Test("A titled claim hands over to state only and back through a session")
+    @Test("A video claim hands over to music's state only through a session")
     @MainActor
-    func claimLifecycleThroughPlaybackSession() {
+    func videoClaimHandsOverToMusic() {
         let center = FakeNowPlayingCenter()
-        // Cold launch with a restored track: WebKit has no card yet.
+        // A paused video publishes its claim; confirmed video playback keeps it.
         var ownership = NowPlayingManager.apply(
-            .claim(title: "Song", artist: "Artist", playbackState: .paused),
+            .claim(title: "Video", artist: "Channel", playbackState: .paused),
             to: center,
             ownership: .none
         )
-        #expect(NowPlayingManager.isNativeClaim(center.nowPlayingInfo))
-
-        // Loading keeps the claim; confirmed playback drops its metadata.
         ownership = NowPlayingManager.apply(.handsOff, to: center, ownership: ownership)
         #expect(NowPlayingManager.isNativeClaim(center.nowPlayingInfo))
-        ownership = NowPlayingManager.apply(.stateOnly(.playing), to: center, ownership: ownership)
+
+        // Back to paused music: the video's metadata goes, Kaset's playback state stays.
+        ownership = NowPlayingManager.apply(.stateOnly(.paused), to: center, ownership: ownership)
+        #expect(ownership == .stateOnly)
         #expect(center.nowPlayingInfo == nil)
 
-        // Pausing, loading the next track and playing it never brings metadata back.
-        for claim in [NowPlayingManager.NowPlayingClaim.stateOnly(.paused), .handsOff, .stateOnly(.playing)] {
+        // Loading, playing and pausing music never brings metadata back.
+        for claim in [NowPlayingManager.NowPlayingClaim.handsOff, .stateOnly(.playing), .stateOnly(.paused)] {
             ownership = NowPlayingManager.apply(claim, to: center, ownership: ownership)
             #expect(ownership == .stateOnly)
             #expect(center.nowPlayingInfo == nil)
         }
-        #expect(center.playbackState == .playing)
+        #expect(center.playbackState == .paused)
 
         ownership = NowPlayingManager.apply(.release, to: center, ownership: ownership)
         #expect(ownership == .none)
         #expect(center.playbackState == .stopped)
-    }
-
-    @Test("WebKit's card is available once the current page has played")
-    func cardAvailableAfterCurrentPagePlays() {
-        var tracker = NowPlayingManager.WebKitCardTracker()
-
-        let beforePlaying = tracker.observe(isPlaying: false, hasTrack: true, documentGeneration: 1)
-        let whilePlaying = tracker.observe(isPlaying: true, hasTrack: true, documentGeneration: 1)
-        let afterPausing = tracker.observe(isPlaying: false, hasTrack: true, documentGeneration: 1)
-
-        #expect(!beforePlaying)
-        #expect(whilePlaying)
-        #expect(afterPausing)
-    }
-
-    @Test("A replaced page has no card until it plays")
-    func replacedPageHasNoCardUntilItPlays() {
-        var tracker = NowPlayingManager.WebKitCardTracker()
-        _ = tracker.observe(isPlaying: true, hasTrack: true, documentGeneration: 1)
-
-        let replacedBeforePlaying = tracker.observe(isPlaying: false, hasTrack: true, documentGeneration: 2)
-        let replacedWhilePlaying = tracker.observe(isPlaying: true, hasTrack: true, documentGeneration: 2)
-
-        #expect(!replacedBeforePlaying)
-        #expect(replacedWhilePlaying)
-    }
-
-    @Test("Clearing the track forgets the card")
-    func clearingTrackForgetsCard() {
-        var tracker = NowPlayingManager.WebKitCardTracker()
-        _ = tracker.observe(isPlaying: true, hasTrack: true, documentGeneration: 1)
-
-        let withoutTrack = tracker.observe(isPlaying: false, hasTrack: false, documentGeneration: 1)
-        let nextTrackBeforePlaying = tracker.observe(isPlaying: false, hasTrack: true, documentGeneration: 1)
-
-        #expect(!withoutTrack)
-        #expect(!nextTrackBeforePlaying)
     }
 
     @Test("Only tagged native metadata is treated as Kaset's claim")

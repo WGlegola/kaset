@@ -128,10 +128,9 @@ extension MPNowPlayingInfoCenter: NowPlayingInfoPublishing {}
 // MARK: - NowPlayingManager
 
 /// Manages remote-command routing and the app's Now Playing ownership.
-/// WebKit publishes the rich card for the music page as its own Now Playing entry. Until that page
-/// has played, Kaset publishes tagged minimal metadata so media keys route to it instead of Apple
-/// Music; once WebKit's card exists, Kaset publishes only its playback state, so the card is the
-/// single Kaset entry in Control Center.
+/// WebKit publishes the rich card for the music page as its own Now Playing entry, so for music
+/// Kaset publishes only its playback state: its own player stays a media-key target, and the card
+/// is the single Kaset entry in Control Center. YouTube video keeps a tagged minimal entry.
 @MainActor
 @Observable
 final class NowPlayingManager {
@@ -144,7 +143,6 @@ final class NowPlayingManager {
     /// What Kaset is publishing to the system center. The claim's tag lets release logic
     /// distinguish our metadata from anything else.
     private var nativeOwnership: NativeNowPlayingOwnership = .none
-    @ObservationIgnored private var webKitCardTracker = WebKitCardTracker()
     @ObservationIgnored private var nowPlayingObservationGeneration: UInt64 = 0
 
     /// YouTube video routing (optional; absent in music-only flows).
@@ -176,7 +174,7 @@ final class NowPlayingManager {
 
     /// What Kaset should tell the system Now Playing center for the current player state.
     /// `handsOff` keeps an existing claim (marked playing) without publishing a new one,
-    /// `stateOnly` publishes playback state without metadata once WebKit's card exists, and
+    /// `stateOnly` publishes playback state without metadata next to WebKit's music card, and
     /// `release` clears what Kaset published when no resumable media remains.
     enum NowPlayingClaim: Equatable {
         case handsOff
@@ -185,29 +183,13 @@ final class NowPlayingManager {
         case claim(title: String, artist: String, playbackState: NativeClaimPlaybackState)
     }
 
-    /// Tracks whether WebKit has a Now Playing card for the current music page. WebKit publishes
-    /// one once the page confirms playback, and the card goes away when the page is replaced.
-    struct WebKitCardTracker: Equatable {
-        private(set) var playedDocumentGeneration: UInt64?
-
-        /// Records the latest player observation and returns whether the current page has a card.
-        mutating func observe(isPlaying: Bool, hasTrack: Bool, documentGeneration: UInt64) -> Bool {
-            if !hasTrack {
-                self.playedDocumentGeneration = nil
-            } else if isPlaying {
-                self.playedDocumentGeneration = documentGeneration
-            }
-            return self.playedDocumentGeneration == documentGeneration
-        }
-    }
-
     /// What Kaset currently publishes to the system Now Playing center.
     enum NativeNowPlayingOwnership: Equatable {
         case none
         /// Playback state only: keeps Kaset's own player a media-key target without adding a
         /// second Control Center entry next to WebKit's card.
         case stateOnly
-        /// Tagged minimal metadata (title and artist).
+        /// Tagged minimal metadata for a YouTube video (title and channel).
         case claim
     }
 
@@ -219,16 +201,15 @@ final class NowPlayingManager {
     }
 
     /// Pure decision: given the active source and its playback state, what claim do we want?
-    /// Once the music page has played (`webKitCardAvailable`), WebKit's card is in Control Center,
-    /// so music publishes playback state only: metadata of our own would be a second entry (#457).
-    /// Before that, inactive music keeps a minimal claim so the Play key resumes Kaset instead of
-    /// Apple Music, and a loading track keeps an existing claim without publishing a new one. A
-    /// paused or loading video keeps a minimal video claim until WebKit reports playback.
+    /// Music publishes playback state only: WebKit's card for the music page is in Control Center
+    /// as soon as the page loads a track, so metadata of our own would be a second entry (#457).
+    /// The state keeps Kaset's own player a media-key target while paused. A loading track keeps
+    /// an existing claim without publishing a new one. A paused or loading video keeps a minimal
+    /// video claim until WebKit reports playback.
     nonisolated static func desiredClaim(
         state: PlayerService.PlaybackState,
-        track: (title: String, artist: String)?,
-        activeVideo: ActiveVideoClaim?,
-        webKitCardAvailable: Bool
+        hasTrack: Bool,
+        activeVideo: ActiveVideoClaim?
     ) -> NowPlayingClaim {
         if let activeVideo {
             guard activeVideo.isPlaybackConfirmed else {
@@ -247,30 +228,17 @@ final class NowPlayingManager {
         case .buffering, .loading:
             return .handsOff
         case .idle, .paused, .ended, .error:
-            guard let track else { return .release }
-            if webKitCardAvailable {
-                return .stateOnly(.paused)
-            }
-            return .claim(title: track.title, artist: track.artist, playbackState: .paused)
+            return hasTrack ? .stateOnly(.paused) : .release
         }
     }
 
     /// Reads current player state and pushes the desired claim to the system center.
     private func updateNowPlayingClaim() {
         guard let player = self.playerService else { return }
-        let webKitCardAvailable = self.webKitCardTracker.observe(
-            isPlaying: player.state == .playing,
-            hasTrack: player.currentTrack != nil,
-            documentGeneration: SingletonPlayerWebView.shared.documentGeneration.currentGeneration
-        )
-        let track = player.currentTrack.map { song in
-            (title: song.title, artist: song.artists.map(\.name).joined(separator: ", "))
-        }
         let claim = Self.desiredClaim(
             state: player.state,
-            track: track,
-            activeVideo: self.activeVideoClaimInput,
-            webKitCardAvailable: webKitCardAvailable
+            hasTrack: player.currentTrack != nil,
+            activeVideo: self.activeVideoClaimInput
         )
         self.applyNowPlayingClaim(claim)
     }
@@ -366,7 +334,7 @@ final class NowPlayingManager {
         self.observePlaybackState(generation: self.nowPlayingObservationGeneration)
     }
 
-    /// Re-runs the claim whenever music state, track metadata, or active-video state changes.
+    /// Re-runs the claim whenever music state, the current track, or active-video state changes.
     private func observePlaybackState(generation: UInt64) {
         withObservationTracking {
             _ = self.playerService?.state
